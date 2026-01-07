@@ -6,7 +6,6 @@ import {
   VIB_PICKUP, VIB_DROP, VIB_RETURN, VIB_CLEAR, VIB_GAMEOVER,
   SCORE_PER_BLOCK, SCORE_PER_LINE_BASE
 } from './constants';
-// 【追加】サウンドマネージャーを読み込み
 import { SoundManager } from './SoundManager';
 
 export class GameScene extends Phaser.Scene {
@@ -25,8 +24,8 @@ export class GameScene extends Phaser.Scene {
     this.scoreText = null;
     this.highScoreText = null;
     
-    // 【追加】音管理用
     this.soundManager = null;
+    this.muteButton = null; // ミュートボタン
   }
 
   create() {
@@ -36,11 +35,9 @@ export class GameScene extends Phaser.Scene {
     this.activeBlock = null;
     this.score = 0;
 
-    // ハイスコア読み込み
     const savedScore = localStorage.getItem('block_puzzle_highscore');
     this.highScore = savedScore ? parseInt(savedScore, 10) : 0;
 
-    // 【追加】サウンドマネージャーの起動
     this.soundManager = new SoundManager(this);
 
     // --- 0. パーティクル準備 ---
@@ -79,6 +76,15 @@ export class GameScene extends Phaser.Scene {
     this.add.text(this.scale.width - 20, 80, 'BEST', { fontSize: '20px', color: '#888888' }).setOrigin(1, 0);
     this.highScoreText = this.add.text(this.scale.width - 20, 105, this.highScore.toString(), { fontSize: '32px', color: '#ffd700', fontStyle: 'bold' }).setOrigin(1, 0);
 
+    // ■ ミュートボタンの作成（テキストで代用）
+    this.muteButton = this.add.text(this.scale.width - 40, 40, '🔊', { fontSize: '32px' })
+      .setOrigin(0.5)
+      .setInteractive()
+      .on('pointerdown', () => {
+        const isMuted = this.soundManager.toggleMute();
+        this.muteButton.setText(isMuted ? '🔇' : '🔊');
+      });
+
     // --- 2. ブロック生成 ---
     this.spawnBlocks();
 
@@ -94,14 +100,17 @@ export class GameScene extends Phaser.Scene {
     // --- 4. ドラッグイベント ---
     this.input.on('dragstart', (pointer, zone) => {
       if (this.isGameOver) return;
+      
+      // 初回タップ時にBGM開始（ブラウザ制限対策）
+      if (!this.soundManager.isPlaying && !this.soundManager.isMuted) {
+        this.soundManager.playBGM();
+      }
+
       const block = this.currentHand[zone.slotIndex];
       if (block) {
         this.activeBlock = block; 
-        
-        // ■ 音と振動
         this.soundManager.playPickup();
         this.vibrate(VIB_PICKUP);
-
         block.setScale(1.0);
         block.setDepth(100);
         this.tweens.add({ targets: block, y: pointer.y - DRAG_OFFSET_Y, x: pointer.x, duration: 100 });
@@ -122,14 +131,11 @@ export class GameScene extends Phaser.Scene {
       if (!block) return;
 
       if (this.tryPlaceBlock(block)) {
-        // ■ 音と振動
         this.soundManager.playDrop();
         this.vibrate(VIB_DROP);
-
         this.currentHand[zone.slotIndex] = null;
         block.destroy();
         this.activeBlock = null;
-        
         this.addScore(SCORE_PER_BLOCK);
         this.checkAndClearLines();
 
@@ -143,10 +149,8 @@ export class GameScene extends Phaser.Scene {
           this.checkGameOver();
         }
       } else {
-        // ■ 音と振動（失敗）
         this.soundManager.playReturn();
         this.vibrate(VIB_RETURN);
-
         block.setScale(PREVIEW_SCALE);
         block.setDepth(0);
         this.tweens.add({ targets: block, x: block.spawnX, y: block.spawnY, duration: 300, ease: 'Back.out' });
@@ -155,7 +159,10 @@ export class GameScene extends Phaser.Scene {
     });
 
     this.input.on('pointerdown', () => {
-      if (this.isGameOver) this.scene.restart();
+      if (this.isGameOver) {
+        this.soundManager.stopBGM(); // リスタート時にBGMリセット
+        this.scene.restart();
+      }
     });
   }
 
@@ -263,25 +270,16 @@ export class GameScene extends Phaser.Scene {
     }
 
     if (linesToClear.length > 0) {
-      // ■ 音と振動：クリア！
       this.soundManager.playClear();
       this.vibrate(VIB_CLEAR);
-
       this.cameras.main.shake(100, 0.01);
-
       const totalLines = linesToClear.length / BOARD_SIZE;
       const bonusScore = (totalLines * (totalLines + 1) / 2) * SCORE_PER_LINE_BASE;
       this.addScore(bonusScore);
-      
       const comboText = this.add.text(this.scale.width / 2, this.scale.height / 2, `+${bonusScore}`, {
         fontSize: '64px', color: '#ffd700', fontStyle: 'bold', stroke: '#000000', strokeThickness: 6
       }).setOrigin(0.5).setDepth(300);
-      
-      this.tweens.add({
-        targets: comboText, y: comboText.y - 100, alpha: 0, duration: 800,
-        onComplete: () => comboText.destroy()
-      });
-
+      this.tweens.add({ targets: comboText, y: comboText.y - 100, alpha: 0, duration: 800, onComplete: () => comboText.destroy() });
       const uniqueCells = [...new Set(linesToClear)];
       uniqueCells.forEach(cell => {
         cell.filled = false;
@@ -308,14 +306,13 @@ export class GameScene extends Phaser.Scene {
         }
       }
     }
-
     this.isGameOver = true;
     localStorage.setItem('block_puzzle_highscore', this.highScore.toString());
-
-    // ■ 音と振動：ゲームオーバー
+    
+    // ゲームオーバー時はBGMを止める
     this.soundManager.playGameOver();
+    
     this.vibrate(VIB_GAMEOVER);
-
     this.add.rectangle(this.scale.width/2, this.scale.height/2, this.scale.width, this.scale.height, 0x000000, 0.7).setDepth(200);
     this.add.text(this.scale.width/2, this.scale.height/2 - 80, 'GAME OVER', { fontSize: '64px', color: '#ff0000', fontStyle: 'bold' }).setOrigin(0.5).setDepth(201);
     this.add.text(this.scale.width/2, this.scale.height/2 + 10, `SCORE: ${this.score}`, { fontSize: '40px', color: '#ffffff' }).setOrigin(0.5).setDepth(201);
