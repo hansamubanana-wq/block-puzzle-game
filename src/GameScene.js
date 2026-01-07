@@ -6,6 +6,8 @@ import {
   VIB_PICKUP, VIB_DROP, VIB_RETURN, VIB_CLEAR, VIB_GAMEOVER,
   SCORE_PER_BLOCK, SCORE_PER_LINE_BASE
 } from './constants';
+// 【追加】サウンドマネージャーを読み込み
+import { SoundManager } from './SoundManager';
 
 export class GameScene extends Phaser.Scene {
   constructor() {
@@ -18,11 +20,13 @@ export class GameScene extends Phaser.Scene {
     this.particleManager = null;
     this.activeBlock = null;
     
-    // スコア関連
     this.score = 0;
     this.highScore = 0;
     this.scoreText = null;
     this.highScoreText = null;
+    
+    // 【追加】音管理用
+    this.soundManager = null;
   }
 
   create() {
@@ -32,9 +36,12 @@ export class GameScene extends Phaser.Scene {
     this.activeBlock = null;
     this.score = 0;
 
-    // ハイスコアの読み込み（保存されていなければ0）
+    // ハイスコア読み込み
     const savedScore = localStorage.getItem('block_puzzle_highscore');
     this.highScore = savedScore ? parseInt(savedScore, 10) : 0;
+
+    // 【追加】サウンドマネージャーの起動
+    this.soundManager = new SoundManager(this);
 
     // --- 0. パーティクル準備 ---
     if (!this.textures.exists('particle_texture')) {
@@ -52,7 +59,7 @@ export class GameScene extends Phaser.Scene {
     const boardWidth = (BLOCK_SIZE + SPACING) * BOARD_SIZE + SPACING;
     const boardHeight = (BLOCK_SIZE + SPACING) * BOARD_SIZE + SPACING;
     this.boardStartX = (this.scale.width - boardWidth) / 2;
-    this.boardStartY = 180; // スコア表示のために少し下げる
+    this.boardStartY = 180;
     this.add.rectangle(this.boardStartX + boardWidth / 2, this.boardStartY + boardHeight / 2, boardWidth, boardHeight, 0x16213e).setStrokeStyle(4, 0x0f3460);
 
     for (let row = 0; row < BOARD_SIZE; row++) {
@@ -65,43 +72,39 @@ export class GameScene extends Phaser.Scene {
       }
     }
 
-    // --- UI（スコア表示） ---
-    // タイトル
+    // --- UI ---
     this.add.text(this.scale.width / 2, 40, 'BLOCK PUZZLE', { fontSize: '32px', color: '#ffffff', fontStyle: 'bold' }).setOrigin(0.5);
-
-    // スコア
     this.add.text(20, 80, 'SCORE', { fontSize: '20px', color: '#888888' });
     this.scoreText = this.add.text(20, 105, '0', { fontSize: '32px', color: '#ffffff', fontStyle: 'bold' });
-
-    // ハイスコア
     this.add.text(this.scale.width - 20, 80, 'BEST', { fontSize: '20px', color: '#888888' }).setOrigin(1, 0);
     this.highScoreText = this.add.text(this.scale.width - 20, 105, this.highScore.toString(), { fontSize: '32px', color: '#ffd700', fontStyle: 'bold' }).setOrigin(1, 0);
 
     // --- 2. ブロック生成 ---
     this.spawnBlocks();
 
-    // --- 3. 透明な操作スロット作成 ---
+    // --- 3. 操作スロット ---
     const spawnPositions = [150, 350, 550];
     for (let i = 0; i < 3; i++) {
       const zone = this.add.zone(spawnPositions[i], SLOT_Y, SLOT_WIDTH, SLOT_HEIGHT);
       zone.setSize(SLOT_WIDTH, SLOT_HEIGHT);
       zone.setInteractive({ draggable: true });
       zone.slotIndex = i;
-      // this.input.enableDebug(zone); // デバッグ用
     }
 
-    // --- 4. ドラッグ操作イベント ---
+    // --- 4. ドラッグイベント ---
     this.input.on('dragstart', (pointer, zone) => {
       if (this.isGameOver) return;
       const block = this.currentHand[zone.slotIndex];
       if (block) {
         this.activeBlock = block; 
+        
+        // ■ 音と振動
+        this.soundManager.playPickup();
         this.vibrate(VIB_PICKUP);
+
         block.setScale(1.0);
         block.setDepth(100);
-        this.tweens.add({
-          targets: block, y: pointer.y - DRAG_OFFSET_Y, x: pointer.x, duration: 100
-        });
+        this.tweens.add({ targets: block, y: pointer.y - DRAG_OFFSET_Y, x: pointer.x, duration: 100 });
       }
     });
 
@@ -119,14 +122,15 @@ export class GameScene extends Phaser.Scene {
       if (!block) return;
 
       if (this.tryPlaceBlock(block)) {
+        // ■ 音と振動
+        this.soundManager.playDrop();
         this.vibrate(VIB_DROP);
+
         this.currentHand[zone.slotIndex] = null;
         block.destroy();
         this.activeBlock = null;
         
-        // ■ ブロック配置スコア加算
         this.addScore(SCORE_PER_BLOCK);
-
         this.checkAndClearLines();
 
         const allSlotsEmpty = this.currentHand.every(slot => slot === null);
@@ -139,12 +143,13 @@ export class GameScene extends Phaser.Scene {
           this.checkGameOver();
         }
       } else {
+        // ■ 音と振動（失敗）
+        this.soundManager.playReturn();
         this.vibrate(VIB_RETURN);
+
         block.setScale(PREVIEW_SCALE);
         block.setDepth(0);
-        this.tweens.add({
-          targets: block, x: block.spawnX, y: block.spawnY, duration: 300, ease: 'Back.out'
-        });
+        this.tweens.add({ targets: block, x: block.spawnX, y: block.spawnY, duration: 300, ease: 'Back.out' });
         this.activeBlock = null;
       }
     });
@@ -154,12 +159,9 @@ export class GameScene extends Phaser.Scene {
     });
   }
 
-  // --- スコア加算メソッド ---
   addScore(points) {
     this.score += points;
     this.scoreText.setText(this.score.toString());
-    
-    // ハイスコア更新チェック
     if (this.score > this.highScore) {
       this.highScore = this.score;
       this.highScoreText.setText(this.highScore.toString());
@@ -245,7 +247,6 @@ export class GameScene extends Phaser.Scene {
 
   checkAndClearLines() {
     let linesToClear = [];
-    // 横方向
     for (let row = 0; row < BOARD_SIZE; row++) {
       let isFull = true;
       for (let col = 0; col < BOARD_SIZE; col++) {
@@ -253,7 +254,6 @@ export class GameScene extends Phaser.Scene {
       }
       if (isFull) for (let col = 0; col < BOARD_SIZE; col++) linesToClear.push(this.gridData[row][col]);
     }
-    // 縦方向
     for (let col = 0; col < BOARD_SIZE; col++) {
       let isFull = true;
       for (let row = 0; row < BOARD_SIZE; row++) {
@@ -263,17 +263,16 @@ export class GameScene extends Phaser.Scene {
     }
 
     if (linesToClear.length > 0) {
+      // ■ 音と振動：クリア！
+      this.soundManager.playClear();
       this.vibrate(VIB_CLEAR);
+
       this.cameras.main.shake(100, 0.01);
 
-      // ■ ライン数に基づくスコア計算（同時消しボーナス）
-      // 横8列 + 縦8列 = 最大16列の可能性はあるが、基本は1～4列程度
-      const totalLines = linesToClear.length / BOARD_SIZE; // 実際のライン数
-      // 計算式: 1列100, 2列300, 3列600, 4列1000... (n * (n+1) / 2 * 100)
+      const totalLines = linesToClear.length / BOARD_SIZE;
       const bonusScore = (totalLines * (totalLines + 1) / 2) * SCORE_PER_LINE_BASE;
       this.addScore(bonusScore);
       
-      // コンボ演出（テキスト表示）
       const comboText = this.add.text(this.scale.width / 2, this.scale.height / 2, `+${bonusScore}`, {
         fontSize: '64px', color: '#ffd700', fontStyle: 'bold', stroke: '#000000', strokeThickness: 6
       }).setOrigin(0.5).setDepth(300);
@@ -311,19 +310,16 @@ export class GameScene extends Phaser.Scene {
     }
 
     this.isGameOver = true;
-    
-    // ■ ハイスコアの保存（ブラウザに記録）
     localStorage.setItem('block_puzzle_highscore', this.highScore.toString());
 
+    // ■ 音と振動：ゲームオーバー
+    this.soundManager.playGameOver();
     this.vibrate(VIB_GAMEOVER);
+
     this.add.rectangle(this.scale.width/2, this.scale.height/2, this.scale.width, this.scale.height, 0x000000, 0.7).setDepth(200);
-    
-    // ゲームオーバー画面でのスコア表示
     this.add.text(this.scale.width/2, this.scale.height/2 - 80, 'GAME OVER', { fontSize: '64px', color: '#ff0000', fontStyle: 'bold' }).setOrigin(0.5).setDepth(201);
-    
     this.add.text(this.scale.width/2, this.scale.height/2 + 10, `SCORE: ${this.score}`, { fontSize: '40px', color: '#ffffff' }).setOrigin(0.5).setDepth(201);
     this.add.text(this.scale.width/2, this.scale.height/2 + 60, `BEST: ${this.highScore}`, { fontSize: '32px', color: '#ffd700' }).setOrigin(0.5).setDepth(201);
-
     this.add.text(this.scale.width/2, this.scale.height/2 + 130, 'Click to Restart', { fontSize: '32px', color: '#ffffff' }).setOrigin(0.5).setDepth(201);
   }
 }
