@@ -2,7 +2,9 @@
 import Phaser from 'phaser';
 import { 
   BOARD_SIZE, BLOCK_SIZE, SPACING, PREVIEW_SCALE, DRAG_OFFSET_Y, 
-  BLOCK_SHAPES, SLOT_WIDTH, SLOT_HEIGHT, SLOT_Y
+  BLOCK_SHAPES, SLOT_WIDTH, SLOT_HEIGHT, SLOT_Y,
+  // 振動設定を読み込み
+  VIB_PICKUP, VIB_DROP, VIB_RETURN, VIB_CLEAR, VIB_GAMEOVER
 } from './constants';
 
 export class GameScene extends Phaser.Scene {
@@ -11,13 +13,9 @@ export class GameScene extends Phaser.Scene {
     this.gridData = [];
     this.boardStartX = 0;
     this.boardStartY = 0;
-    
-    // 【変更】3つのスロット（最初は空っぽ）として管理
     this.currentHand = [null, null, null]; 
     this.isGameOver = false;
     this.particleManager = null;
-    
-    // 【追加】現在操作中のブロックを一時的に記憶する変数
     this.activeBlock = null; 
   }
 
@@ -62,41 +60,33 @@ export class GameScene extends Phaser.Scene {
     // --- 2. ブロック生成 ---
     this.spawnBlocks();
 
-    // --- ■【ここが重要】透明な操作スロット(Zone)の作成 ---
+    // --- 3. 透明な操作スロット(Zone)の作成 ---
     const spawnPositions = [150, 350, 550];
     for (let i = 0; i < 3; i++) {
-      // 透明な操作エリアを作成
       const zone = this.add.zone(spawnPositions[i], SLOT_Y, SLOT_WIDTH, SLOT_HEIGHT)
                            .setRectangleDropZone(SLOT_WIDTH, SLOT_HEIGHT);
-      
-      // ドラッグ可能にする
       zone.setInteractive({ draggable: true });
-      
-      // 自分が何番目のスロットかを記憶させておく
       zone.slotIndex = i;
-      
-      // デバッグ用：操作エリアを可視化したい場合はコメントを外す
-      // this.input.enableDebug(zone);
     }
 
-    // --- 3. ドラッグ操作イベント（対象がZoneになります） ---
+    // --- 4. ドラッグ操作イベント ---
     this.input.on('dragstart', (pointer, zone) => {
       if (this.isGameOver) return;
       
-      // 触られたZoneに対応するブロックを取得
       const block = this.currentHand[zone.slotIndex];
-      
-      // ブロックが存在する場合のみ操作開始
       if (block) {
-        this.activeBlock = block; // 操作対象として記憶
+        this.activeBlock = block; 
         
+        // ■ 振動：持ち上げた時
+        this.vibrate(VIB_PICKUP);
+
         block.setScale(1.0);
         block.setDepth(100);
         
         this.tweens.add({
           targets: block,
           y: pointer.y - DRAG_OFFSET_Y,
-          x: pointer.x, // X座標も指に合わせる
+          x: pointer.x, 
           duration: 100
         });
       }
@@ -104,8 +94,6 @@ export class GameScene extends Phaser.Scene {
 
     this.input.on('drag', (pointer, zone, dragX, dragY) => {
       if (this.isGameOver) return;
-      
-      // 操作中のブロックがあれば動かす
       if (this.activeBlock) {
         this.activeBlock.x = dragX;
         this.activeBlock.y = dragY - DRAG_OFFSET_Y;
@@ -116,19 +104,18 @@ export class GameScene extends Phaser.Scene {
       if (this.isGameOver) return;
       
       const block = this.activeBlock;
-      
-      // 操作中のブロックがなければ何もしない
       if (!block) return;
 
       if (this.tryPlaceBlock(block)) {
-        // 配置成功：スロットを空にする
+        // ■ 振動：置いた時
+        this.vibrate(VIB_DROP);
+
         this.currentHand[zone.slotIndex] = null;
         block.destroy();
         this.activeBlock = null;
 
         this.checkAndClearLines();
 
-        // 全てのスロットが空になったかチェック
         const allSlotsEmpty = this.currentHand.every(slot => slot === null);
         if (allSlotsEmpty) {
           this.time.delayedCall(300, () => {
@@ -139,12 +126,14 @@ export class GameScene extends Phaser.Scene {
           this.checkGameOver();
         }
       } else {
-        // 配置失敗：元の位置に戻す
+        // ■ 振動：戻る時
+        this.vibrate(VIB_RETURN);
+
         block.setScale(PREVIEW_SCALE);
         block.setDepth(0);
         this.tweens.add({
           targets: block,
-          x: block.spawnX, // 記憶しておいた初期位置に戻す
+          x: block.spawnX,
           y: block.spawnY,
           duration: 300,
           ease: 'Back.out'
@@ -162,21 +151,21 @@ export class GameScene extends Phaser.Scene {
 
   // --- ヘルパーメソッド ---
 
+  // 安全に振動させるためのラッパー関数
+  vibrate(pattern) {
+    if (navigator.vibrate) {
+      navigator.vibrate(pattern);
+    }
+  }
+
   spawnBlocks() {
     const spawnPositions = [150, 350, 550];
-    
-    // 空いているスロットに新しいブロックを生成
     for (let i = 0; i < 3; i++) {
       if (this.currentHand[i] === null) {
         const shapeData = Phaser.Utils.Array.GetRandom(BLOCK_SHAPES);
-        // 出現位置(SLOT_Y)で作成
         const block = this.createDraggableBlock(spawnPositions[i], SLOT_Y, shapeData);
-        
-        // 元の位置を記憶（戻る処理用）
         block.spawnX = spawnPositions[i];
         block.spawnY = SLOT_Y;
-        
-        // スロットに登録
         this.currentHand[i] = block;
       }
     }
@@ -207,10 +196,6 @@ export class GameScene extends Phaser.Scene {
         }
       }
     }
-    
-    // 【変更】ブロック自体のインタラクティブ設定は削除します
-    // container.setSize(...) // 不要
-    // container.setInteractive({ draggable: true }); // 不要
     
     container.setScale(PREVIEW_SCALE);
     return container;
@@ -275,6 +260,9 @@ export class GameScene extends Phaser.Scene {
     }
 
     if (linesToClear.length > 0) {
+      // ■ 振動：ライン消去（激しく！）
+      this.vibrate(VIB_CLEAR);
+
       this.cameras.main.shake(100, 0.01);
       const uniqueCells = [...new Set(linesToClear)];
       uniqueCells.forEach(cell => {
@@ -291,10 +279,8 @@ export class GameScene extends Phaser.Scene {
   }
 
   checkGameOver() {
-    // currentHandの中身がnullの可能性があるのでチェックを追加
     for (let i = 0; i < 3; i++) {
       const block = this.currentHand[i];
-      // ブロックが存在する場合のみ判定
       if (block) {
         const matrix = block.shapeData.shape;
         for (let row = 0; row < BOARD_SIZE; row++) {
@@ -305,7 +291,11 @@ export class GameScene extends Phaser.Scene {
       }
     }
 
-    isGameOver = true;
+    this.isGameOver = true;
+
+    // ■ 振動：ゲームオーバー（長めに）
+    this.vibrate(VIB_GAMEOVER);
+
     this.add.rectangle(this.scale.width/2, this.scale.height/2, this.scale.width, this.scale.height, 0x000000, 0.7).setDepth(200);
     this.add.text(this.scale.width/2, this.scale.height/2 - 50, 'GAME OVER', { fontSize: '64px', color: '#ff0000', fontStyle: 'bold' }).setOrigin(0.5).setDepth(201);
     this.add.text(this.scale.width/2, this.scale.height/2 + 50, 'Click to Restart', { fontSize: '32px', color: '#ffffff' }).setOrigin(0.5).setDepth(201);
