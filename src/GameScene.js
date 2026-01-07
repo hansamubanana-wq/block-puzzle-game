@@ -3,7 +3,6 @@ import Phaser from 'phaser';
 import { 
   BOARD_SIZE, BLOCK_SIZE, SPACING, PREVIEW_SCALE, DRAG_OFFSET_Y, 
   BLOCK_SHAPES, SLOT_WIDTH, SLOT_HEIGHT, SLOT_Y,
-  // 振動設定を読み込み
   VIB_PICKUP, VIB_DROP, VIB_RETURN, VIB_CLEAR, VIB_GAMEOVER
 } from './constants';
 
@@ -63,10 +62,21 @@ export class GameScene extends Phaser.Scene {
     // --- 3. 透明な操作スロット(Zone)の作成 ---
     const spawnPositions = [150, 350, 550];
     for (let i = 0; i < 3; i++) {
-      const zone = this.add.zone(spawnPositions[i], SLOT_Y, SLOT_WIDTH, SLOT_HEIGHT)
-                           .setRectangleDropZone(SLOT_WIDTH, SLOT_HEIGHT);
+      // ■修正：setRectangleDropZoneは使わず、普通にゾーンを作ります
+      const zone = this.add.zone(spawnPositions[i], SLOT_Y, SLOT_WIDTH, SLOT_HEIGHT);
+      
+      // サイズを明示的に設定（重要）
+      zone.setSize(SLOT_WIDTH, SLOT_HEIGHT);
+      
+      // ドラッグ可能にする
       zone.setInteractive({ draggable: true });
+      
+      // インデックスを記憶
       zone.slotIndex = i;
+
+      // ■デバッグ表示：透明な板がどこにあるか緑色の枠線で表示します
+      // （位置が合っているか確認できたら、この行は削除してください）
+      this.input.enableDebug(zone);
     }
 
     // --- 4. ドラッグ操作イベント ---
@@ -77,7 +87,6 @@ export class GameScene extends Phaser.Scene {
       if (block) {
         this.activeBlock = block; 
         
-        // ■ 振動：持ち上げた時
         this.vibrate(VIB_PICKUP);
 
         block.setScale(1.0);
@@ -107,7 +116,6 @@ export class GameScene extends Phaser.Scene {
       if (!block) return;
 
       if (this.tryPlaceBlock(block)) {
-        // ■ 振動：置いた時
         this.vibrate(VIB_DROP);
 
         this.currentHand[zone.slotIndex] = null;
@@ -126,7 +134,6 @@ export class GameScene extends Phaser.Scene {
           this.checkGameOver();
         }
       } else {
-        // ■ 振動：戻る時
         this.vibrate(VIB_RETURN);
 
         block.setScale(PREVIEW_SCALE);
@@ -151,10 +158,9 @@ export class GameScene extends Phaser.Scene {
 
   // --- ヘルパーメソッド ---
 
-  // 安全に振動させるためのラッパー関数
   vibrate(pattern) {
     if (navigator.vibrate) {
-      navigator.vibrate(pattern);
+      try { navigator.vibrate(pattern); } catch (e) { }
     }
   }
 
@@ -197,6 +203,7 @@ export class GameScene extends Phaser.Scene {
       }
     }
     
+    // Zoneで操作するため、ブロック自体のインタラクティブは不要
     container.setScale(PREVIEW_SCALE);
     return container;
   }
@@ -260,9 +267,7 @@ export class GameScene extends Phaser.Scene {
     }
 
     if (linesToClear.length > 0) {
-      // ■ 振動：ライン消去（激しく！）
       this.vibrate(VIB_CLEAR);
-
       this.cameras.main.shake(100, 0.01);
       const uniqueCells = [...new Set(linesToClear)];
       uniqueCells.forEach(cell => {
@@ -292,10 +297,7 @@ export class GameScene extends Phaser.Scene {
     }
 
     this.isGameOver = true;
-
-    // ■ 振動：ゲームオーバー（長めに）
     this.vibrate(VIB_GAMEOVER);
-
     this.add.rectangle(this.scale.width/2, this.scale.height/2, this.scale.width, this.scale.height, 0x000000, 0.7).setDepth(200);
     this.add.text(this.scale.width/2, this.scale.height/2 - 50, 'GAME OVER', { fontSize: '64px', color: '#ff0000', fontStyle: 'bold' }).setOrigin(0.5).setDepth(201);
     this.add.text(this.scale.width/2, this.scale.height/2 + 50, 'Click to Restart', { fontSize: '32px', color: '#ffffff' }).setOrigin(0.5).setDepth(201);
