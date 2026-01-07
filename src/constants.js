@@ -9,39 +9,33 @@ export const SPACING = 4;
 export const PREVIEW_SCALE = 0.6;
 export const DRAG_OFFSET_Y = 100;
 
-// ブロックの形状データ
-// 1: ブロックあり, 0: 空白
+// ■ デザイン変更：ネオンカラーパレット
+// Cyan, Magenta, Lime, Orange, Purple などを使用
 export const BLOCK_SHAPES = [
-  { color: 0xff5252, shape: [[1, 1, 1]] },                // 横棒3
-  { color: 0xff5252, shape: [[1, 1, 1, 1]] },             // 横棒4
-  { color: 0xff5252, shape: [[1, 1, 1, 1, 1]] },          // 横棒5
-  { color: 0x448aff, shape: [[1, 0], [1, 0], [1, 1]] },   // L字
-  { color: 0x448aff, shape: [[0, 1], [0, 1], [1, 1]] },   // 逆L字
-  { color: 0x69f0ae, shape: [[1, 1], [1, 1]] },           // 正方形
-  { color: 0xffd740, shape: [[1]] },                      // 1マス
-  { color: 0xffd740, shape: [[1, 1]] },                   // 2マス
-  { color: 0xe040fb, shape: [[0, 1, 0], [1, 1, 1]] }      // 凸型
+  { color: 0xff0055, shape: [[1, 1, 1]] },                // Neon Red
+  { color: 0xff0055, shape: [[1, 1, 1, 1]] },
+  { color: 0xff0055, shape: [[1, 1, 1, 1, 1]] },
+  { color: 0x00ccff, shape: [[1, 0], [1, 0], [1, 1]] },   // Neon Cyan
+  { color: 0x00ccff, shape: [[0, 1], [0, 1], [1, 1]] },
+  { color: 0xccff00, shape: [[1, 1], [1, 1]] },           // Neon Lime
+  { color: 0xffaa00, shape: [[1]] },                      // Neon Orange
+  { color: 0xffaa00, shape: [[1, 1]] },
+  { color: 0xaa00ff, shape: [[0, 1, 0], [1, 1, 1]] }      // Neon Purple
 ];
 
-// 当たり判定の余白（片側ピクセル数）
+// その他設定
 export const HIT_AREA_CX = 30;
+export const SLOT_WIDTH = 200;
+export const SLOT_HEIGHT = 250;
+export const SLOT_Y = 800;
 
-// 透明な操作スロットの設定
-export const SLOT_WIDTH = 200;  // 1つのスロットの幅
-export const SLOT_HEIGHT = 250; // スロットの高さ
-export const SLOT_Y = 800;      // スロットの中心Y座標
+// 振動設定
+export const VIB_PICKUP = 30;
+export const VIB_DROP = 40;
+export const VIB_RETURN = 20;
+export const VIB_CLEAR = [50, 30, 50];
+export const VIB_GAMEOVER = 800;
 
-// ■ 振動（バイブレーション）の設定 [ミリ秒]
-export const VIB_PICKUP = 30;    // ブロックを持った時（短く）
-export const VIB_DROP = 40;      // 置いた時（少し強く）
-export const VIB_RETURN = 20;    // 置けなくて戻った時
-export const VIB_CLEAR = [50, 30, 50]; // ライン消去時（ダダダッと揺らす）
-export const VIB_GAMEOVER = 800; // ゲームオーバー（長く）
-// src/constants.js
-// ... (上の内容はそのまま) ...
-
-// ■ スコア設定
-export const SCORE_PER_BLOCK = 10;   // ブロックを置いた時の点数
-export const SCORE_PER_LINE_BASE = 100; // ライン消去の基本点
-// 複数ライン消しはボーナス (1列:100, 2列:300, 3列:600...)
-export const SCORE_VIB_DURATION = 200; // スコア更新時の演出時間
+// スコア設定
+export const SCORE_PER_BLOCK = 10;
+export const SCORE_PER_LINE_BASE = 100;

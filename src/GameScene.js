@@ -25,7 +25,7 @@ export class GameScene extends Phaser.Scene {
     this.highScoreText = null;
     
     this.soundManager = null;
-    this.muteButton = null; // ミュートボタン
+    this.muteButton = null;
   }
 
   create() {
@@ -47,8 +47,10 @@ export class GameScene extends Phaser.Scene {
       graphics.fillCircle(10, 10, 10);
       graphics.generateTexture('particle_texture', 20, 20);
     }
+    // パーティクルも「加算合成（ADD）」で光るように
     this.particleManager = this.add.particles(0, 0, 'particle_texture', {
-      lifetime: 500, speed: { min: 150, max: 350 }, scale: { start: 0.6, end: 0 }, blendMode: 'ADD', emitting: false
+      lifetime: 600, speed: { min: 150, max: 400 }, scale: { start: 0.8, end: 0 }, 
+      blendMode: 'ADD', emitting: false
     });
     this.particleManager.setDepth(200);
 
@@ -57,29 +59,37 @@ export class GameScene extends Phaser.Scene {
     const boardHeight = (BLOCK_SIZE + SPACING) * BOARD_SIZE + SPACING;
     this.boardStartX = (this.scale.width - boardWidth) / 2;
     this.boardStartY = 180;
-    this.add.rectangle(this.boardStartX + boardWidth / 2, this.boardStartY + boardHeight / 2, boardWidth, boardHeight, 0x16213e).setStrokeStyle(4, 0x0f3460);
+
+    // ■ 盤面の背景：少し透明なダークブルーに
+    this.add.rectangle(this.boardStartX + boardWidth / 2, this.boardStartY + boardHeight / 2, boardWidth, boardHeight, 0x000000, 0.3)
+      .setStrokeStyle(2, 0x4444ff); // 青い枠線
 
     for (let row = 0; row < BOARD_SIZE; row++) {
       this.gridData[row] = [];
       for (let col = 0; col < BOARD_SIZE; col++) {
         const x = this.boardStartX + SPACING + (BLOCK_SIZE / 2) + col * (BLOCK_SIZE + SPACING);
         const y = this.boardStartY + SPACING + (BLOCK_SIZE / 2) + row * (BLOCK_SIZE + SPACING);
-        this.add.rectangle(x, y, BLOCK_SIZE, BLOCK_SIZE, 0x0f3460);
+        // ■ マス目：暗い色で控えめに
+        this.add.rectangle(x, y, BLOCK_SIZE, BLOCK_SIZE, 0xffffff, 0.05);
         this.gridData[row][col] = { x, y, filled: false, sprite: null };
       }
     }
 
     // --- UI ---
-    this.add.text(this.scale.width / 2, 40, 'BLOCK PUZZLE', { fontSize: '32px', color: '#ffffff', fontStyle: 'bold' }).setOrigin(0.5);
-    this.add.text(20, 80, 'SCORE', { fontSize: '20px', color: '#888888' });
+    // タイトルに影をつけてリッチに
+    this.add.text(this.scale.width / 2, 40, 'BLOCK PUZZLE', { 
+      fontSize: '32px', color: '#ffffff', fontStyle: 'bold',
+      shadow: { offsetX: 2, offsetY: 2, color: '#00ccff', blur: 10, stroke: true, fill: true }
+    }).setOrigin(0.5);
+
+    this.add.text(20, 80, 'SCORE', { fontSize: '20px', color: '#00ccff' });
     this.scoreText = this.add.text(20, 105, '0', { fontSize: '32px', color: '#ffffff', fontStyle: 'bold' });
-    this.add.text(this.scale.width - 20, 80, 'BEST', { fontSize: '20px', color: '#888888' }).setOrigin(1, 0);
+
+    this.add.text(this.scale.width - 20, 80, 'BEST', { fontSize: '20px', color: '#00ccff' }).setOrigin(1, 0);
     this.highScoreText = this.add.text(this.scale.width - 20, 105, this.highScore.toString(), { fontSize: '32px', color: '#ffd700', fontStyle: 'bold' }).setOrigin(1, 0);
 
-    // ■ ミュートボタンの作成（テキストで代用）
     this.muteButton = this.add.text(this.scale.width - 40, 40, '🔊', { fontSize: '32px' })
-      .setOrigin(0.5)
-      .setInteractive()
+      .setOrigin(0.5).setInteractive()
       .on('pointerdown', () => {
         const isMuted = this.soundManager.toggleMute();
         this.muteButton.setText(isMuted ? '🔇' : '🔊');
@@ -100,11 +110,7 @@ export class GameScene extends Phaser.Scene {
     // --- 4. ドラッグイベント ---
     this.input.on('dragstart', (pointer, zone) => {
       if (this.isGameOver) return;
-      
-      // 初回タップ時にBGM開始（ブラウザ制限対策）
-      if (!this.soundManager.isPlaying && !this.soundManager.isMuted) {
-        this.soundManager.playBGM();
-      }
+      if (!this.soundManager.isPlaying && !this.soundManager.isMuted) this.soundManager.playBGM();
 
       const block = this.currentHand[zone.slotIndex];
       if (block) {
@@ -160,7 +166,7 @@ export class GameScene extends Phaser.Scene {
 
     this.input.on('pointerdown', () => {
       if (this.isGameOver) {
-        this.soundManager.stopBGM(); // リスタート時にBGMリセット
+        this.soundManager.stopBGM();
         this.scene.restart();
       }
     });
@@ -207,7 +213,12 @@ export class GameScene extends Phaser.Scene {
     for (let r = 0; r < rows; r++) {
       for (let c = 0; c < cols; c++) {
         if (matrix[r][c] === 1) {
-          const block = this.add.rectangle(c * BLOCK_SIZE + offsetX, r * BLOCK_SIZE + offsetY, BLOCK_SIZE - 2, BLOCK_SIZE - 2, shapeData.color);
+          // ■ ブロック装飾：枠線（Stroke）を追加してネオン風に
+          const block = this.add.rectangle(
+            c * BLOCK_SIZE + offsetX, r * BLOCK_SIZE + offsetY, 
+            BLOCK_SIZE - 2, BLOCK_SIZE - 2, 
+            shapeData.color
+          ).setStrokeStyle(3, 0xffffff); // 3pxの白い枠線
           container.add(block);
         }
       }
@@ -245,7 +256,12 @@ export class GameScene extends Phaser.Scene {
           const targetCol = baseCol + c;
           const targetCell = this.gridData[targetRow][targetCol];
           targetCell.filled = true;
-          targetCell.sprite = this.add.rectangle(targetCell.x, targetCell.y, BLOCK_SIZE - 2, BLOCK_SIZE - 2, shapeData.color);
+          // ■ 配置後のブロックにも枠線を追加
+          targetCell.sprite = this.add.rectangle(
+            targetCell.x, targetCell.y, 
+            BLOCK_SIZE - 2, BLOCK_SIZE - 2, 
+            shapeData.color
+          ).setStrokeStyle(3, 0xffffff);
         }
       }
     }
@@ -308,13 +324,16 @@ export class GameScene extends Phaser.Scene {
     }
     this.isGameOver = true;
     localStorage.setItem('block_puzzle_highscore', this.highScore.toString());
-    
-    // ゲームオーバー時はBGMを止める
     this.soundManager.playGameOver();
-    
     this.vibrate(VIB_GAMEOVER);
-    this.add.rectangle(this.scale.width/2, this.scale.height/2, this.scale.width, this.scale.height, 0x000000, 0.7).setDepth(200);
-    this.add.text(this.scale.width/2, this.scale.height/2 - 80, 'GAME OVER', { fontSize: '64px', color: '#ff0000', fontStyle: 'bold' }).setOrigin(0.5).setDepth(201);
+    
+    // ゲームオーバー画面も少しリッチに
+    this.add.rectangle(this.scale.width/2, this.scale.height/2, this.scale.width, this.scale.height, 0x000000, 0.8).setDepth(200);
+    this.add.text(this.scale.width/2, this.scale.height/2 - 80, 'GAME OVER', { 
+      fontSize: '64px', color: '#ff0055', fontStyle: 'bold',
+      shadow: { offsetX: 2, offsetY: 2, color: '#ff0000', blur: 10, stroke: true, fill: true }
+    }).setOrigin(0.5).setDepth(201);
+    
     this.add.text(this.scale.width/2, this.scale.height/2 + 10, `SCORE: ${this.score}`, { fontSize: '40px', color: '#ffffff' }).setOrigin(0.5).setDepth(201);
     this.add.text(this.scale.width/2, this.scale.height/2 + 60, `BEST: ${this.highScore}`, { fontSize: '32px', color: '#ffd700' }).setOrigin(0.5).setDepth(201);
     this.add.text(this.scale.width/2, this.scale.height/2 + 130, 'Click to Restart', { fontSize: '32px', color: '#ffffff' }).setOrigin(0.5).setDepth(201);
