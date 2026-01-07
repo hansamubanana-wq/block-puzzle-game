@@ -37,3 +37,11 @@ export const VIB_DROP = 40;      // 置いた時（少し強く）
 export const VIB_RETURN = 20;    // 置けなくて戻った時
 export const VIB_CLEAR = [50, 30, 50]; // ライン消去時（ダダダッと揺らす）
 export const VIB_GAMEOVER = 800; // ゲームオーバー（長く）
+// src/constants.js
+// ... (上の内容はそのまま) ...
+
+// ■ スコア設定
+export const SCORE_PER_BLOCK = 10;   // ブロックを置いた時の点数
+export const SCORE_PER_LINE_BASE = 100; // ライン消去の基本点
+// 複数ライン消しはボーナス (1列:100, 2列:300, 3列:600...)
+export const SCORE_VIB_DURATION = 200; // スコア更新時の演出時間

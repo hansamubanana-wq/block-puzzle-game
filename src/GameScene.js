@@ -3,7 +3,8 @@ import Phaser from 'phaser';
 import { 
   BOARD_SIZE, BLOCK_SIZE, SPACING, PREVIEW_SCALE, DRAG_OFFSET_Y, 
   BLOCK_SHAPES, SLOT_WIDTH, SLOT_HEIGHT, SLOT_Y,
-  VIB_PICKUP, VIB_DROP, VIB_RETURN, VIB_CLEAR, VIB_GAMEOVER
+  VIB_PICKUP, VIB_DROP, VIB_RETURN, VIB_CLEAR, VIB_GAMEOVER,
+  SCORE_PER_BLOCK, SCORE_PER_LINE_BASE
 } from './constants';
 
 export class GameScene extends Phaser.Scene {
@@ -15,16 +16,25 @@ export class GameScene extends Phaser.Scene {
     this.currentHand = [null, null, null]; 
     this.isGameOver = false;
     this.particleManager = null;
-    this.activeBlock = null; 
+    this.activeBlock = null;
+    
+    // スコア関連
+    this.score = 0;
+    this.highScore = 0;
+    this.scoreText = null;
+    this.highScoreText = null;
   }
-
-  preload() { }
 
   create() {
     this.isGameOver = false;
     this.currentHand = [null, null, null];
     this.gridData = [];
     this.activeBlock = null;
+    this.score = 0;
+
+    // ハイスコアの読み込み（保存されていなければ0）
+    const savedScore = localStorage.getItem('block_puzzle_highscore');
+    this.highScore = savedScore ? parseInt(savedScore, 10) : 0;
 
     // --- 0. パーティクル準備 ---
     if (!this.textures.exists('particle_texture')) {
@@ -42,7 +52,7 @@ export class GameScene extends Phaser.Scene {
     const boardWidth = (BLOCK_SIZE + SPACING) * BOARD_SIZE + SPACING;
     const boardHeight = (BLOCK_SIZE + SPACING) * BOARD_SIZE + SPACING;
     this.boardStartX = (this.scale.width - boardWidth) / 2;
-    this.boardStartY = 150;
+    this.boardStartY = 180; // スコア表示のために少し下げる
     this.add.rectangle(this.boardStartX + boardWidth / 2, this.boardStartY + boardHeight / 2, boardWidth, boardHeight, 0x16213e).setStrokeStyle(4, 0x0f3460);
 
     for (let row = 0; row < BOARD_SIZE; row++) {
@@ -54,49 +64,43 @@ export class GameScene extends Phaser.Scene {
         this.gridData[row][col] = { x, y, filled: false, sprite: null };
       }
     }
-    this.add.text(this.scale.width / 2, 60, 'BLOCK PUZZLE', { fontSize: '48px', color: '#ffffff', fontStyle: 'bold' }).setOrigin(0.5);
+
+    // --- UI（スコア表示） ---
+    // タイトル
+    this.add.text(this.scale.width / 2, 40, 'BLOCK PUZZLE', { fontSize: '32px', color: '#ffffff', fontStyle: 'bold' }).setOrigin(0.5);
+
+    // スコア
+    this.add.text(20, 80, 'SCORE', { fontSize: '20px', color: '#888888' });
+    this.scoreText = this.add.text(20, 105, '0', { fontSize: '32px', color: '#ffffff', fontStyle: 'bold' });
+
+    // ハイスコア
+    this.add.text(this.scale.width - 20, 80, 'BEST', { fontSize: '20px', color: '#888888' }).setOrigin(1, 0);
+    this.highScoreText = this.add.text(this.scale.width - 20, 105, this.highScore.toString(), { fontSize: '32px', color: '#ffd700', fontStyle: 'bold' }).setOrigin(1, 0);
 
     // --- 2. ブロック生成 ---
     this.spawnBlocks();
 
-    // --- 3. 透明な操作スロット(Zone)の作成 ---
+    // --- 3. 透明な操作スロット作成 ---
     const spawnPositions = [150, 350, 550];
     for (let i = 0; i < 3; i++) {
-      // ■修正：setRectangleDropZoneは使わず、普通にゾーンを作ります
       const zone = this.add.zone(spawnPositions[i], SLOT_Y, SLOT_WIDTH, SLOT_HEIGHT);
-      
-      // サイズを明示的に設定（重要）
       zone.setSize(SLOT_WIDTH, SLOT_HEIGHT);
-      
-      // ドラッグ可能にする
       zone.setInteractive({ draggable: true });
-      
-      // インデックスを記憶
       zone.slotIndex = i;
-
-      // ■デバッグ表示：透明な板がどこにあるか緑色の枠線で表示します
-      // （位置が合っているか確認できたら、この行は削除してください）
-      this.input.enableDebug(zone);
+      // this.input.enableDebug(zone); // デバッグ用
     }
 
     // --- 4. ドラッグ操作イベント ---
     this.input.on('dragstart', (pointer, zone) => {
       if (this.isGameOver) return;
-      
       const block = this.currentHand[zone.slotIndex];
       if (block) {
         this.activeBlock = block; 
-        
         this.vibrate(VIB_PICKUP);
-
         block.setScale(1.0);
         block.setDepth(100);
-        
         this.tweens.add({
-          targets: block,
-          y: pointer.y - DRAG_OFFSET_Y,
-          x: pointer.x, 
-          duration: 100
+          targets: block, y: pointer.y - DRAG_OFFSET_Y, x: pointer.x, duration: 100
         });
       }
     });
@@ -111,16 +115,17 @@ export class GameScene extends Phaser.Scene {
 
     this.input.on('dragend', (pointer, zone) => {
       if (this.isGameOver) return;
-      
       const block = this.activeBlock;
       if (!block) return;
 
       if (this.tryPlaceBlock(block)) {
         this.vibrate(VIB_DROP);
-
         this.currentHand[zone.slotIndex] = null;
         block.destroy();
         this.activeBlock = null;
+        
+        // ■ ブロック配置スコア加算
+        this.addScore(SCORE_PER_BLOCK);
 
         this.checkAndClearLines();
 
@@ -135,15 +140,10 @@ export class GameScene extends Phaser.Scene {
         }
       } else {
         this.vibrate(VIB_RETURN);
-
         block.setScale(PREVIEW_SCALE);
         block.setDepth(0);
         this.tweens.add({
-          targets: block,
-          x: block.spawnX,
-          y: block.spawnY,
-          duration: 300,
-          ease: 'Back.out'
+          targets: block, x: block.spawnX, y: block.spawnY, duration: 300, ease: 'Back.out'
         });
         this.activeBlock = null;
       }
@@ -154,14 +154,20 @@ export class GameScene extends Phaser.Scene {
     });
   }
 
-  update() { }
-
-  // --- ヘルパーメソッド ---
+  // --- スコア加算メソッド ---
+  addScore(points) {
+    this.score += points;
+    this.scoreText.setText(this.score.toString());
+    
+    // ハイスコア更新チェック
+    if (this.score > this.highScore) {
+      this.highScore = this.score;
+      this.highScoreText.setText(this.highScore.toString());
+    }
+  }
 
   vibrate(pattern) {
-    if (navigator.vibrate) {
-      try { navigator.vibrate(pattern); } catch (e) { }
-    }
+    if (navigator.vibrate) { try { navigator.vibrate(pattern); } catch (e) { } }
   }
 
   spawnBlocks() {
@@ -180,7 +186,6 @@ export class GameScene extends Phaser.Scene {
   createDraggableBlock(x, y, shapeData) {
     const container = this.add.container(x, y);
     container.shapeData = shapeData; 
-
     const matrix = shapeData.shape;
     const rows = matrix.length;
     const cols = matrix[0].length;
@@ -190,20 +195,14 @@ export class GameScene extends Phaser.Scene {
     const offsetY = -height / 2 + BLOCK_SIZE / 2;
     container.gridOffsetX = offsetX;
     container.gridOffsetY = offsetY;
-
     for (let r = 0; r < rows; r++) {
       for (let c = 0; c < cols; c++) {
         if (matrix[r][c] === 1) {
-          const block = this.add.rectangle(
-            c * BLOCK_SIZE + offsetX, r * BLOCK_SIZE + offsetY, 
-            BLOCK_SIZE - 2, BLOCK_SIZE - 2, shapeData.color
-          );
+          const block = this.add.rectangle(c * BLOCK_SIZE + offsetX, r * BLOCK_SIZE + offsetY, BLOCK_SIZE - 2, BLOCK_SIZE - 2, shapeData.color);
           container.add(block);
         }
       }
     }
-    
-    // Zoneで操作するため、ブロック自体のインタラクティブは不要
     container.setScale(PREVIEW_SCALE);
     return container;
   }
@@ -226,12 +225,9 @@ export class GameScene extends Phaser.Scene {
     const shapeData = container.shapeData;
     const startX = container.x + container.gridOffsetX;
     const startY = container.y + container.gridOffsetY;
-
     const baseCol = Math.round((startX - (this.boardStartX + SPACING + BLOCK_SIZE/2)) / (BLOCK_SIZE + SPACING));
     const baseRow = Math.round((startY - (this.boardStartY + SPACING + BLOCK_SIZE/2)) / (BLOCK_SIZE + SPACING));
-
     if (!this.canPlaceAt(shapeData.shape, baseRow, baseCol)) return false;
-
     const matrix = shapeData.shape;
     for (let r = 0; r < matrix.length; r++) {
       for (let c = 0; c < matrix[0].length; c++) {
@@ -240,9 +236,7 @@ export class GameScene extends Phaser.Scene {
           const targetCol = baseCol + c;
           const targetCell = this.gridData[targetRow][targetCol];
           targetCell.filled = true;
-          targetCell.sprite = this.add.rectangle(
-            targetCell.x, targetCell.y, BLOCK_SIZE - 2, BLOCK_SIZE - 2, shapeData.color
-          );
+          targetCell.sprite = this.add.rectangle(targetCell.x, targetCell.y, BLOCK_SIZE - 2, BLOCK_SIZE - 2, shapeData.color);
         }
       }
     }
@@ -251,6 +245,7 @@ export class GameScene extends Phaser.Scene {
 
   checkAndClearLines() {
     let linesToClear = [];
+    // 横方向
     for (let row = 0; row < BOARD_SIZE; row++) {
       let isFull = true;
       for (let col = 0; col < BOARD_SIZE; col++) {
@@ -258,6 +253,7 @@ export class GameScene extends Phaser.Scene {
       }
       if (isFull) for (let col = 0; col < BOARD_SIZE; col++) linesToClear.push(this.gridData[row][col]);
     }
+    // 縦方向
     for (let col = 0; col < BOARD_SIZE; col++) {
       let isFull = true;
       for (let row = 0; row < BOARD_SIZE; row++) {
@@ -269,6 +265,24 @@ export class GameScene extends Phaser.Scene {
     if (linesToClear.length > 0) {
       this.vibrate(VIB_CLEAR);
       this.cameras.main.shake(100, 0.01);
+
+      // ■ ライン数に基づくスコア計算（同時消しボーナス）
+      // 横8列 + 縦8列 = 最大16列の可能性はあるが、基本は1～4列程度
+      const totalLines = linesToClear.length / BOARD_SIZE; // 実際のライン数
+      // 計算式: 1列100, 2列300, 3列600, 4列1000... (n * (n+1) / 2 * 100)
+      const bonusScore = (totalLines * (totalLines + 1) / 2) * SCORE_PER_LINE_BASE;
+      this.addScore(bonusScore);
+      
+      // コンボ演出（テキスト表示）
+      const comboText = this.add.text(this.scale.width / 2, this.scale.height / 2, `+${bonusScore}`, {
+        fontSize: '64px', color: '#ffd700', fontStyle: 'bold', stroke: '#000000', strokeThickness: 6
+      }).setOrigin(0.5).setDepth(300);
+      
+      this.tweens.add({
+        targets: comboText, y: comboText.y - 100, alpha: 0, duration: 800,
+        onComplete: () => comboText.destroy()
+      });
+
       const uniqueCells = [...new Set(linesToClear)];
       uniqueCells.forEach(cell => {
         cell.filled = false;
@@ -297,9 +311,19 @@ export class GameScene extends Phaser.Scene {
     }
 
     this.isGameOver = true;
+    
+    // ■ ハイスコアの保存（ブラウザに記録）
+    localStorage.setItem('block_puzzle_highscore', this.highScore.toString());
+
     this.vibrate(VIB_GAMEOVER);
     this.add.rectangle(this.scale.width/2, this.scale.height/2, this.scale.width, this.scale.height, 0x000000, 0.7).setDepth(200);
-    this.add.text(this.scale.width/2, this.scale.height/2 - 50, 'GAME OVER', { fontSize: '64px', color: '#ff0000', fontStyle: 'bold' }).setOrigin(0.5).setDepth(201);
-    this.add.text(this.scale.width/2, this.scale.height/2 + 50, 'Click to Restart', { fontSize: '32px', color: '#ffffff' }).setOrigin(0.5).setDepth(201);
+    
+    // ゲームオーバー画面でのスコア表示
+    this.add.text(this.scale.width/2, this.scale.height/2 - 80, 'GAME OVER', { fontSize: '64px', color: '#ff0000', fontStyle: 'bold' }).setOrigin(0.5).setDepth(201);
+    
+    this.add.text(this.scale.width/2, this.scale.height/2 + 10, `SCORE: ${this.score}`, { fontSize: '40px', color: '#ffffff' }).setOrigin(0.5).setDepth(201);
+    this.add.text(this.scale.width/2, this.scale.height/2 + 60, `BEST: ${this.highScore}`, { fontSize: '32px', color: '#ffd700' }).setOrigin(0.5).setDepth(201);
+
+    this.add.text(this.scale.width/2, this.scale.height/2 + 130, 'Click to Restart', { fontSize: '32px', color: '#ffffff' }).setOrigin(0.5).setDepth(201);
   }
 }
