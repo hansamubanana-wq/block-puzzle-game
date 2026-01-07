@@ -22,3 +22,6 @@ export const BLOCK_SHAPES = [
   { color: 0xffd740, shape: [[1, 1]] },                   // 2マス
   { color: 0xe040fb, shape: [[0, 1, 0], [1, 1, 1]] }      // 凸型
 ];
+
+// 当たり判定の余白（片側ピクセル数）
+export const HIT_AREA_CX = 30;

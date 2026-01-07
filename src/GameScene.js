@@ -6,7 +6,8 @@ import {
   SPACING, 
   PREVIEW_SCALE, 
   DRAG_OFFSET_Y, 
-  BLOCK_SHAPES 
+  BLOCK_SHAPES,
+  HIT_AREA_CX 
 } from './constants';
 
 export class GameScene extends Phaser.Scene {
@@ -194,7 +195,9 @@ export class GameScene extends Phaser.Scene {
       }
     }
 
-    container.setSize(width, height);
+    // ★重要：判定サイズに余白（HIT_AREA_CX * 2）を足して大きくする
+    container.setSize(width + HIT_AREA_CX * 2, height + HIT_AREA_CX * 2);
+    
     container.setInteractive({ draggable: true });
     container.setScale(PREVIEW_SCALE);
     
