@@ -6,6 +6,8 @@ const BOARD_SIZE = 8;
 const BLOCK_SIZE = 60;
 const SPACING = 4;
 const PREVIEW_SCALE = 0.6; 
+// スマホ操作時に指よりどれくらい上に表示するか（ピクセル）
+const DRAG_OFFSET_Y = 100;
 
 const config = {
   type: Phaser.AUTO,
@@ -30,7 +32,8 @@ let gridData = [];
 let boardStartX = 0;
 let boardStartY = 0;
 let currentHand = []; 
-let isGameOver = false; // ゲームオーバー状態管理
+let isGameOver = false;
+let particleManager = null; // パーティクル管理用
 
 const BLOCK_SHAPES = [
   { color: 0xff5252, shape: [[1, 1, 1]] }, 
@@ -50,6 +53,23 @@ function create() {
   isGameOver = false;
   currentHand = [];
   gridData = [];
+
+  // --- 0. パーティクル用テクスチャの生成（プログラムで描く） ---
+  const graphics = this.make.graphics({x: 0, y: 0, add: false});
+  graphics.fillStyle(0xffffff, 1);
+  graphics.fillCircle(10, 10, 10); // 白い円を描く
+  graphics.generateTexture('particle_texture', 20, 20); // 'particle_texture'という名前でメモリに保存
+
+  // パーティクルマネージャーの作成
+  particleManager = this.add.particles(0, 0, 'particle_texture', {
+    lifetime: 500,
+    speed: { min: 150, max: 350 },
+    scale: { start: 0.6, end: 0 },
+    blendMode: 'ADD',
+    emitting: false // 最初は出さない
+  });
+  // パーティクルを一番手前に表示
+  particleManager.setDepth(200);
 
   // --- 1. 盤面の描画 ---
   const boardWidth = (BLOCK_SIZE + SPACING) * BOARD_SIZE + SPACING;
@@ -77,42 +97,45 @@ function create() {
 
   // --- 3. ドラッグ操作 ---
   this.input.on('dragstart', (pointer, gameObject) => {
-    if (isGameOver) return; // ゲームオーバーなら操作禁止
+    if (isGameOver) return;
     gameObject.setScale(1.0);
     gameObject.setDepth(100);
+    
+    // 持ち上げた瞬間、指の上に移動させるアニメーション
+    this.tweens.add({
+      targets: gameObject,
+      y: pointer.y - DRAG_OFFSET_Y,
+      duration: 100
+    });
   });
 
   this.input.on('drag', (pointer, gameObject, dragX, dragY) => {
     if (isGameOver) return;
+    
+    // 【重要】指の位置(dragX, dragY)よりも上に表示する
     gameObject.x = dragX;
-    gameObject.y = dragY;
+    gameObject.y = dragY - DRAG_OFFSET_Y;
   });
 
   this.input.on('dragend', (pointer, gameObject) => {
     if (isGameOver) return;
 
     if (tryPlaceBlock(this, gameObject)) {
-      // 配置成功
       currentHand = currentHand.filter(item => item !== gameObject);
       gameObject.destroy();
 
-      // ライン消去
       checkAndClearLines(this);
 
-      // 補充チェック
       if (currentHand.length === 0) {
         this.time.delayedCall(300, () => {
           spawnBlocks(this);
-          // 補充後に詰み判定
           checkGameOver(this);
         });
       } else {
-        // 配置後に詰み判定
         checkGameOver(this);
       }
 
     } else {
-      // 配置失敗（戻す）
       gameObject.setScale(PREVIEW_SCALE);
       gameObject.setDepth(0);
       this.tweens.add({
@@ -125,10 +148,9 @@ function create() {
     }
   });
 
-  // リスタート用クリックイベント
   this.input.on('pointerdown', () => {
     if (isGameOver) {
-      this.scene.restart(); // シーンを再起動
+      this.scene.restart();
     }
   });
 }
@@ -180,20 +202,18 @@ function createDraggableBlock(scene, x, y, shapeData) {
   return container;
 }
 
-// 指定した位置(baseRow, baseCol)に形状(matrix)が置けるかだけを判定する関数
 function canPlaceAt(matrix, baseRow, baseCol) {
   for (let r = 0; r < matrix.length; r++) {
     for (let c = 0; c < matrix[0].length; c++) {
       if (matrix[r][c] === 1) {
         const targetRow = baseRow + r;
         const targetCol = baseCol + c;
-        // 範囲外または既に埋まっている場合はNG
         if (targetRow < 0 || targetRow >= BOARD_SIZE || targetCol < 0 || targetCol >= BOARD_SIZE) return false;
         if (gridData[targetRow][targetCol].filled) return false;
       }
     }
   }
-  return true; // 全部OKなら置ける
+  return true;
 }
 
 function tryPlaceBlock(scene, container) {
@@ -204,12 +224,10 @@ function tryPlaceBlock(scene, container) {
   const baseCol = Math.round((startX - (boardStartX + SPACING + BLOCK_SIZE/2)) / (BLOCK_SIZE + SPACING));
   const baseRow = Math.round((startY - (boardStartY + SPACING + BLOCK_SIZE/2)) / (BLOCK_SIZE + SPACING));
 
-  // canPlaceAt関数を使って判定
   if (!canPlaceAt(shapeData.shape, baseRow, baseCol)) {
     return false;
   }
 
-  // 配置実行
   const matrix = shapeData.shape;
   for (let r = 0; r < matrix.length; r++) {
     for (let c = 0; c < matrix[0].length; c++) {
@@ -232,6 +250,7 @@ function tryPlaceBlock(scene, container) {
 function checkAndClearLines(scene) {
   let linesToClear = [];
 
+  // 横方向チェック
   for (let row = 0; row < BOARD_SIZE; row++) {
     let isFull = true;
     for (let col = 0; col < BOARD_SIZE; col++) {
@@ -245,6 +264,7 @@ function checkAndClearLines(scene) {
     }
   }
 
+  // 縦方向チェック
   for (let col = 0; col < BOARD_SIZE; col++) {
     let isFull = true;
     for (let row = 0; row < BOARD_SIZE; row++) {
@@ -259,14 +279,26 @@ function checkAndClearLines(scene) {
   }
 
   if (linesToClear.length > 0) {
+    // ■ 画面を揺らす（強さ0.01、時間100ms）
+    scene.cameras.main.shake(100, 0.01);
+
     const uniqueCells = [...new Set(linesToClear)];
+    
     uniqueCells.forEach(cell => {
       cell.filled = false;
+      
       if (cell.sprite) {
+        // ■ パーティクルを発生させる
+        // ブロックの中心位置から10個くらい飛び散らせる
+        particleManager.emitParticleAt(cell.sprite.x, cell.sprite.y, 10);
+
+        // ブロック消滅アニメーション
         scene.tweens.add({
           targets: cell.sprite,
-          scaleX: 0, scaleY: 0, alpha: 0,
-          duration: 200,
+          scaleX: 1.2, // 一瞬膨らんでから
+          scaleY: 1.2,
+          alpha: 0,    // 消える
+          duration: 150,
           onComplete: () => {
             if (cell.sprite) cell.sprite.destroy();
             cell.sprite = null;
@@ -277,35 +309,22 @@ function checkAndClearLines(scene) {
   }
 }
 
-// ■ ゲームオーバー判定
 function checkGameOver(scene) {
-  // 手持ちの全ブロックについて調べる
   for (let i = 0; i < currentHand.length; i++) {
     const block = currentHand[i];
     const matrix = block.shapeData.shape;
-
-    // 盤面の全マスについて「ここに置ける？」を試す
     for (let row = 0; row < BOARD_SIZE; row++) {
       for (let col = 0; col < BOARD_SIZE; col++) {
-        // もし1つでも置ける場所があれば、ゲームオーバーではない
-        if (canPlaceAt(matrix, row, col)) {
-          return; 
-        }
+        if (canPlaceAt(matrix, row, col)) return; 
       }
     }
   }
 
-  // ここまで来たら「どのブロックもどこにも置けない」状態
   isGameOver = true;
-  
-  // ゲームオーバー演出
-  scene.add.rectangle(scene.scale.width/2, scene.scale.height/2, scene.scale.width, scene.scale.height, 0x000000, 0.7)
-       .setDepth(200);
-       
+  scene.add.rectangle(scene.scale.width/2, scene.scale.height/2, scene.scale.width, scene.scale.height, 0x000000, 0.7).setDepth(200);
   scene.add.text(scene.scale.width/2, scene.scale.height/2 - 50, 'GAME OVER', {
     fontSize: '64px', color: '#ff0000', fontStyle: 'bold'
   }).setOrigin(0.5).setDepth(201);
-
   scene.add.text(scene.scale.width/2, scene.scale.height/2 + 50, 'Click to Restart', {
     fontSize: '32px', color: '#ffffff'
   }).setOrigin(0.5).setDepth(201);
