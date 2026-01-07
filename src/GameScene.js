@@ -1,122 +1,136 @@
 // src/GameScene.js
 import Phaser from 'phaser';
 import { 
-  BOARD_SIZE, 
-  BLOCK_SIZE, 
-  SPACING, 
-  PREVIEW_SCALE, 
-  DRAG_OFFSET_Y, 
-  BLOCK_SHAPES,
-  HIT_AREA_CX 
+  BOARD_SIZE, BLOCK_SIZE, SPACING, PREVIEW_SCALE, DRAG_OFFSET_Y, 
+  BLOCK_SHAPES, SLOT_WIDTH, SLOT_HEIGHT, SLOT_Y
 } from './constants';
 
 export class GameScene extends Phaser.Scene {
   constructor() {
     super('GameScene');
-
-    // クラス内の変数を初期化
     this.gridData = [];
     this.boardStartX = 0;
     this.boardStartY = 0;
-    this.currentHand = [];
+    
+    // 【変更】3つのスロット（最初は空っぽ）として管理
+    this.currentHand = [null, null, null]; 
     this.isGameOver = false;
     this.particleManager = null;
+    
+    // 【追加】現在操作中のブロックを一時的に記憶する変数
+    this.activeBlock = null; 
   }
 
-  preload() {
-    // 画像などのロードが必要ならここに記述
-  }
+  preload() { }
 
   create() {
     this.isGameOver = false;
-    this.currentHand = [];
+    this.currentHand = [null, null, null];
     this.gridData = [];
+    this.activeBlock = null;
 
-    // --- 0. パーティクル用テクスチャ生成 ---
+    // --- 0. パーティクル準備 ---
     if (!this.textures.exists('particle_texture')) {
       const graphics = this.make.graphics({x: 0, y: 0, add: false});
       graphics.fillStyle(0xffffff, 1);
       graphics.fillCircle(10, 10, 10);
       graphics.generateTexture('particle_texture', 20, 20);
     }
-
     this.particleManager = this.add.particles(0, 0, 'particle_texture', {
-      lifetime: 500,
-      speed: { min: 150, max: 350 },
-      scale: { start: 0.6, end: 0 },
-      blendMode: 'ADD',
-      emitting: false
+      lifetime: 500, speed: { min: 150, max: 350 }, scale: { start: 0.6, end: 0 }, blendMode: 'ADD', emitting: false
     });
     this.particleManager.setDepth(200);
 
-    // --- 1. 盤面の描画 ---
+    // --- 1. 盤面描画 ---
     const boardWidth = (BLOCK_SIZE + SPACING) * BOARD_SIZE + SPACING;
     const boardHeight = (BLOCK_SIZE + SPACING) * BOARD_SIZE + SPACING;
-    
     this.boardStartX = (this.scale.width - boardWidth) / 2;
     this.boardStartY = 150;
-
-    this.add.rectangle(
-      this.boardStartX + boardWidth / 2, 
-      this.boardStartY + boardHeight / 2, 
-      boardWidth, 
-      boardHeight, 
-      0x16213e
-    ).setStrokeStyle(4, 0x0f3460);
+    this.add.rectangle(this.boardStartX + boardWidth / 2, this.boardStartY + boardHeight / 2, boardWidth, boardHeight, 0x16213e).setStrokeStyle(4, 0x0f3460);
 
     for (let row = 0; row < BOARD_SIZE; row++) {
       this.gridData[row] = [];
       for (let col = 0; col < BOARD_SIZE; col++) {
         const x = this.boardStartX + SPACING + (BLOCK_SIZE / 2) + col * (BLOCK_SIZE + SPACING);
         const y = this.boardStartY + SPACING + (BLOCK_SIZE / 2) + row * (BLOCK_SIZE + SPACING);
-        
-        // 背景のマス目
         this.add.rectangle(x, y, BLOCK_SIZE, BLOCK_SIZE, 0x0f3460);
-        
-        // データを保存
         this.gridData[row][col] = { x, y, filled: false, sprite: null };
       }
     }
-
-    this.add.text(this.scale.width / 2, 60, 'BLOCK PUZZLE', { 
-      fontSize: '48px', color: '#ffffff', fontStyle: 'bold' 
-    }).setOrigin(0.5);
+    this.add.text(this.scale.width / 2, 60, 'BLOCK PUZZLE', { fontSize: '48px', color: '#ffffff', fontStyle: 'bold' }).setOrigin(0.5);
 
     // --- 2. ブロック生成 ---
     this.spawnBlocks();
 
-    // --- 3. ドラッグ操作イベント ---
-    this.input.on('dragstart', (pointer, gameObject) => {
+    // --- ■【ここが重要】透明な操作スロット(Zone)の作成 ---
+    const spawnPositions = [150, 350, 550];
+    for (let i = 0; i < 3; i++) {
+      // 透明な操作エリアを作成
+      const zone = this.add.zone(spawnPositions[i], SLOT_Y, SLOT_WIDTH, SLOT_HEIGHT)
+                           .setRectangleDropZone(SLOT_WIDTH, SLOT_HEIGHT);
+      
+      // ドラッグ可能にする
+      zone.setInteractive({ draggable: true });
+      
+      // 自分が何番目のスロットかを記憶させておく
+      zone.slotIndex = i;
+      
+      // デバッグ用：操作エリアを可視化したい場合はコメントを外す
+      // this.input.enableDebug(zone);
+    }
+
+    // --- 3. ドラッグ操作イベント（対象がZoneになります） ---
+    this.input.on('dragstart', (pointer, zone) => {
       if (this.isGameOver) return;
       
-      gameObject.setScale(1.0);
-      gameObject.setDepth(100);
+      // 触られたZoneに対応するブロックを取得
+      const block = this.currentHand[zone.slotIndex];
       
-      // 指の上に移動
-      this.tweens.add({
-        targets: gameObject,
-        y: pointer.y - DRAG_OFFSET_Y,
-        duration: 100
-      });
+      // ブロックが存在する場合のみ操作開始
+      if (block) {
+        this.activeBlock = block; // 操作対象として記憶
+        
+        block.setScale(1.0);
+        block.setDepth(100);
+        
+        this.tweens.add({
+          targets: block,
+          y: pointer.y - DRAG_OFFSET_Y,
+          x: pointer.x, // X座標も指に合わせる
+          duration: 100
+        });
+      }
     });
 
-    this.input.on('drag', (pointer, gameObject, dragX, dragY) => {
+    this.input.on('drag', (pointer, zone, dragX, dragY) => {
       if (this.isGameOver) return;
-      gameObject.x = dragX;
-      gameObject.y = dragY - DRAG_OFFSET_Y;
+      
+      // 操作中のブロックがあれば動かす
+      if (this.activeBlock) {
+        this.activeBlock.x = dragX;
+        this.activeBlock.y = dragY - DRAG_OFFSET_Y;
+      }
     });
 
-    this.input.on('dragend', (pointer, gameObject) => {
+    this.input.on('dragend', (pointer, zone) => {
       if (this.isGameOver) return;
+      
+      const block = this.activeBlock;
+      
+      // 操作中のブロックがなければ何もしない
+      if (!block) return;
 
-      if (this.tryPlaceBlock(gameObject)) {
-        // 配置成功
-        this.currentHand = this.currentHand.filter(item => item !== gameObject);
-        gameObject.destroy();
+      if (this.tryPlaceBlock(block)) {
+        // 配置成功：スロットを空にする
+        this.currentHand[zone.slotIndex] = null;
+        block.destroy();
+        this.activeBlock = null;
 
         this.checkAndClearLines();
 
-        if (this.currentHand.length === 0) {
+        // 全てのスロットが空になったかチェック
+        const allSlotsEmpty = this.currentHand.every(slot => slot === null);
+        if (allSlotsEmpty) {
           this.time.delayedCall(300, () => {
             this.spawnBlocks();
             this.checkGameOver();
@@ -124,43 +138,48 @@ export class GameScene extends Phaser.Scene {
         } else {
           this.checkGameOver();
         }
-
       } else {
-        // 配置失敗（戻す）
-        gameObject.setScale(PREVIEW_SCALE);
-        gameObject.setDepth(0);
+        // 配置失敗：元の位置に戻す
+        block.setScale(PREVIEW_SCALE);
+        block.setDepth(0);
         this.tweens.add({
-          targets: gameObject,
-          x: gameObject.input.dragStartX,
-          y: gameObject.input.dragStartY,
+          targets: block,
+          x: block.spawnX, // 記憶しておいた初期位置に戻す
+          y: block.spawnY,
           duration: 300,
           ease: 'Back.out'
         });
+        this.activeBlock = null;
       }
     });
 
     this.input.on('pointerdown', () => {
-      if (this.isGameOver) {
-        this.scene.restart();
-      }
+      if (this.isGameOver) this.scene.restart();
     });
   }
 
-  update() {
-    // 今回は特に毎フレーム処理なし
-  }
+  update() { }
 
   // --- ヘルパーメソッド ---
 
   spawnBlocks() {
     const spawnPositions = [150, 350, 550];
-    this.currentHand = [];
-
-    spawnPositions.forEach((posX, index) => {
-      const shapeData = Phaser.Utils.Array.GetRandom(BLOCK_SHAPES);
-      const block = this.createDraggableBlock(posX, 800, shapeData);
-      this.currentHand.push(block);
-    });
+    
+    // 空いているスロットに新しいブロックを生成
+    for (let i = 0; i < 3; i++) {
+      if (this.currentHand[i] === null) {
+        const shapeData = Phaser.Utils.Array.GetRandom(BLOCK_SHAPES);
+        // 出現位置(SLOT_Y)で作成
+        const block = this.createDraggableBlock(spawnPositions[i], SLOT_Y, shapeData);
+        
+        // 元の位置を記憶（戻る処理用）
+        block.spawnX = spawnPositions[i];
+        block.spawnY = SLOT_Y;
+        
+        // スロットに登録
+        this.currentHand[i] = block;
+      }
+    }
   }
 
   createDraggableBlock(x, y, shapeData) {
@@ -172,11 +191,8 @@ export class GameScene extends Phaser.Scene {
     const cols = matrix[0].length;
     const width = cols * BLOCK_SIZE;
     const height = rows * BLOCK_SIZE;
-    
-    // 中心オフセット計算
     const offsetX = -width / 2 + BLOCK_SIZE / 2;
     const offsetY = -height / 2 + BLOCK_SIZE / 2;
-
     container.gridOffsetX = offsetX;
     container.gridOffsetY = offsetY;
 
@@ -184,23 +200,19 @@ export class GameScene extends Phaser.Scene {
       for (let c = 0; c < cols; c++) {
         if (matrix[r][c] === 1) {
           const block = this.add.rectangle(
-            c * BLOCK_SIZE + offsetX, 
-            r * BLOCK_SIZE + offsetY, 
-            BLOCK_SIZE - 2, 
-            BLOCK_SIZE - 2, 
-            shapeData.color
+            c * BLOCK_SIZE + offsetX, r * BLOCK_SIZE + offsetY, 
+            BLOCK_SIZE - 2, BLOCK_SIZE - 2, shapeData.color
           );
           container.add(block);
         }
       }
     }
-
-    // ★重要：判定サイズに余白（HIT_AREA_CX * 2）を足して大きくする
-    container.setSize(width + HIT_AREA_CX * 2, height + HIT_AREA_CX * 2);
     
-    container.setInteractive({ draggable: true });
+    // 【変更】ブロック自体のインタラクティブ設定は削除します
+    // container.setSize(...) // 不要
+    // container.setInteractive({ draggable: true }); // 不要
+    
     container.setScale(PREVIEW_SCALE);
-    
     return container;
   }
 
@@ -210,13 +222,8 @@ export class GameScene extends Phaser.Scene {
         if (matrix[r][c] === 1) {
           const targetRow = baseRow + r;
           const targetCol = baseCol + c;
-          
-          if (targetRow < 0 || targetRow >= BOARD_SIZE || targetCol < 0 || targetCol >= BOARD_SIZE) {
-            return false;
-          }
-          if (this.gridData[targetRow][targetCol].filled) {
-            return false;
-          }
+          if (targetRow < 0 || targetRow >= BOARD_SIZE || targetCol < 0 || targetCol >= BOARD_SIZE) return false;
+          if (this.gridData[targetRow][targetCol].filled) return false;
         }
       }
     }
@@ -231,11 +238,8 @@ export class GameScene extends Phaser.Scene {
     const baseCol = Math.round((startX - (this.boardStartX + SPACING + BLOCK_SIZE/2)) / (BLOCK_SIZE + SPACING));
     const baseRow = Math.round((startY - (this.boardStartY + SPACING + BLOCK_SIZE/2)) / (BLOCK_SIZE + SPACING));
 
-    if (!this.canPlaceAt(shapeData.shape, baseRow, baseCol)) {
-      return false;
-    }
+    if (!this.canPlaceAt(shapeData.shape, baseRow, baseCol)) return false;
 
-    // 配置実行
     const matrix = shapeData.shape;
     for (let r = 0; r < matrix.length; r++) {
       for (let c = 0; c < matrix[0].length; c++) {
@@ -243,14 +247,9 @@ export class GameScene extends Phaser.Scene {
           const targetRow = baseRow + r;
           const targetCol = baseCol + c;
           const targetCell = this.gridData[targetRow][targetCol];
-
           targetCell.filled = true;
           targetCell.sprite = this.add.rectangle(
-            targetCell.x, 
-            targetCell.y, 
-            BLOCK_SIZE - 2, 
-            BLOCK_SIZE - 2, 
-            shapeData.color
+            targetCell.x, targetCell.y, BLOCK_SIZE - 2, BLOCK_SIZE - 2, shapeData.color
           );
         }
       }
@@ -260,58 +259,31 @@ export class GameScene extends Phaser.Scene {
 
   checkAndClearLines() {
     let linesToClear = [];
-
-    // 横方向
     for (let row = 0; row < BOARD_SIZE; row++) {
       let isFull = true;
       for (let col = 0; col < BOARD_SIZE; col++) {
-        if (!this.gridData[row][col].filled) {
-          isFull = false;
-          break;
-        }
+        if (!this.gridData[row][col].filled) { isFull = false; break; }
       }
-      if (isFull) {
-        for (let col = 0; col < BOARD_SIZE; col++) linesToClear.push(this.gridData[row][col]);
-      }
+      if (isFull) for (let col = 0; col < BOARD_SIZE; col++) linesToClear.push(this.gridData[row][col]);
     }
-
-    // 縦方向
     for (let col = 0; col < BOARD_SIZE; col++) {
       let isFull = true;
       for (let row = 0; row < BOARD_SIZE; row++) {
-        if (!this.gridData[row][col].filled) {
-          isFull = false;
-          break;
-        }
+        if (!this.gridData[row][col].filled) { isFull = false; break; }
       }
-      if (isFull) {
-        for (let row = 0; row < BOARD_SIZE; row++) linesToClear.push(this.gridData[row][col]);
-      }
+      if (isFull) for (let row = 0; row < BOARD_SIZE; row++) linesToClear.push(this.gridData[row][col]);
     }
 
     if (linesToClear.length > 0) {
-      // 画面シェイク
       this.cameras.main.shake(100, 0.01);
-
       const uniqueCells = [...new Set(linesToClear)];
-      
       uniqueCells.forEach(cell => {
         cell.filled = false;
         if (cell.sprite) {
-          // パーティクル発生
           this.particleManager.emitParticleAt(cell.sprite.x, cell.sprite.y, 10);
-
-          // 消滅アニメーション
           this.tweens.add({
-            targets: cell.sprite,
-            scaleX: 1.2,
-            scaleY: 1.2,
-            alpha: 0,
-            duration: 150,
-            onComplete: () => {
-              if (cell.sprite) cell.sprite.destroy();
-              cell.sprite = null;
-            }
+            targets: cell.sprite, scaleX: 1.2, scaleY: 1.2, alpha: 0, duration: 150,
+            onComplete: () => { if (cell.sprite) cell.sprite.destroy(); cell.sprite = null; }
           });
         }
       });
@@ -319,42 +291,23 @@ export class GameScene extends Phaser.Scene {
   }
 
   checkGameOver() {
-    for (let i = 0; i < this.currentHand.length; i++) {
+    // currentHandの中身がnullの可能性があるのでチェックを追加
+    for (let i = 0; i < 3; i++) {
       const block = this.currentHand[i];
-      const matrix = block.shapeData.shape;
-
-      for (let row = 0; row < BOARD_SIZE; row++) {
-        for (let col = 0; col < BOARD_SIZE; col++) {
-          if (this.canPlaceAt(matrix, row, col)) {
-            return; // 置ける場所があるのでセーフ
+      // ブロックが存在する場合のみ判定
+      if (block) {
+        const matrix = block.shapeData.shape;
+        for (let row = 0; row < BOARD_SIZE; row++) {
+          for (let col = 0; col < BOARD_SIZE; col++) {
+            if (this.canPlaceAt(matrix, row, col)) return; 
           }
         }
       }
     }
 
-    // ゲームオーバー
-    this.isGameOver = true;
-    
-    this.add.rectangle(
-      this.scale.width/2, 
-      this.scale.height/2, 
-      this.scale.width, 
-      this.scale.height, 
-      0x000000, 0.7
-    ).setDepth(200);
-    
-    this.add.text(
-      this.scale.width/2, 
-      this.scale.height/2 - 50, 
-      'GAME OVER', 
-      { fontSize: '64px', color: '#ff0000', fontStyle: 'bold' }
-    ).setOrigin(0.5).setDepth(201);
-
-    this.add.text(
-      this.scale.width/2, 
-      this.scale.height/2 + 50, 
-      'Click to Restart', 
-      { fontSize: '32px', color: '#ffffff' }
-    ).setOrigin(0.5).setDepth(201);
+    isGameOver = true;
+    this.add.rectangle(this.scale.width/2, this.scale.height/2, this.scale.width, this.scale.height, 0x000000, 0.7).setDepth(200);
+    this.add.text(this.scale.width/2, this.scale.height/2 - 50, 'GAME OVER', { fontSize: '64px', color: '#ff0000', fontStyle: 'bold' }).setOrigin(0.5).setDepth(201);
+    this.add.text(this.scale.width/2, this.scale.height/2 + 50, 'Click to Restart', { fontSize: '32px', color: '#ffffff' }).setOrigin(0.5).setDepth(201);
   }
 }

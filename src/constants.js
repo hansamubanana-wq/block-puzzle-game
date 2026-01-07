@@ -24,4 +24,10 @@ export const BLOCK_SHAPES = [
 ];
 
 // 当たり判定の余白（片側ピクセル数）
+// ※スロット方式に変更したためメインでは使いませんが、念のため定義を残します
 export const HIT_AREA_CX = 30;
+
+// ■ 透明な操作スロットの設定
+export const SLOT_WIDTH = 200;  // 1つのスロットの幅
+export const SLOT_HEIGHT = 250; // スロットの高さ（縦に広く取ります）
+export const SLOT_Y = 800;      // スロットの中心Y座標（ブロックの出現位置と同じにする）

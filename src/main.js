@@ -1,7 +1,7 @@
 // src/main.js
 import './style.css';
 import Phaser from 'phaser';
-import { GameScene } from './GameScene'; // 作成したGameSceneクラスを読み込む
+import { GameScene } from './GameScene';
 
 const config = {
   type: Phaser.AUTO,
@@ -13,9 +13,7 @@ const config = {
     mode: Phaser.Scale.FIT,
     autoCenter: Phaser.Scale.CENTER_BOTH
   },
-  // シーンの登録方法が変わりました
   scene: [GameScene] 
 };
 
-// ゲーム開始
 new Phaser.Game(config);
