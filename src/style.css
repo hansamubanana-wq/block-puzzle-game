@@ -1,0 +1,17 @@
+/* style.css */
+body {
+  margin: 0;
+  padding: 0;
+  background-color: #000000; /* 背景を黒に */
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  height: 100vh; /* 画面の高さを一杯に使う */
+  overflow: hidden; /* スクロールバーを出さない */
+}
+
+#app {
+  /* ゲーム画面を表示する場所 */
+  width: 100%;
+  height: 100%;
+}
